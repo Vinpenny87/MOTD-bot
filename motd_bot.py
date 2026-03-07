@@ -178,7 +178,6 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
 
         # Non-pro notice AFTER the images (there are none) – still post after the main announcement
         if now.weekday() in NON_PRO_WEEKDAYS:
-            await res_ch.send(NON_PRO_MESSAGE)
             await sub_ch.send(NON_PRO_MESSAGE)
         return
 
@@ -254,7 +253,6 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
 
     # -------- NON-PRO DAY NOTICE (AFTER images) --------
     if now.weekday() in NON_PRO_WEEKDAYS:
-        await res_ch.send(NON_PRO_MESSAGE)
         await sub_ch.send(NON_PRO_MESSAGE)
 
 
