@@ -1,3 +1,4 @@
+# IMPORTS
 import os
 import datetime as dt
 from zoneinfo import ZoneInfo
@@ -7,11 +8,10 @@ import aiohttp
 import discord
 from discord.ext import commands, tasks
 
+# BOT TOKEN
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# ====================
 # CONFIG
-# ====================
 SUBMISSIONS_CHANNEL_ID = 1197939941372608532
 RESULTS_CHANNEL_ID = 983134844492079154
 
@@ -25,8 +25,8 @@ TOP_N = 3
 EXCLUDE_BOT_VOTE = False
 
 DEV_USER_IDS = {
-    1097539138959462471,
-    582786439763329024,
+    1097539138959462471, # Vinpenny
+    582786439763329024,  # Cheese
 }
 
 # Monday + Thursday
@@ -37,15 +37,14 @@ NON_PRO_MESSAGE = (
 )
 
 
-# ====================
 # HELPERS
-# ====================
+# Detect if a message contains an image
 def is_image_attachment(att: discord.Attachment) -> bool:
     if att.content_type:
         return att.content_type.startswith("image/")
     return att.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))
 
-
+# Count votes
 def score_message(msg: discord.Message) -> int:
     for r in msg.reactions:
         if str(r.emoji) == VOTE_EMOJI:
@@ -55,19 +54,19 @@ def score_message(msg: discord.Message) -> int:
             return count
     return 0
 
-
+# Calculate MotD time window
 def get_window_scheduled(now: dt.datetime):
     end = now.replace(hour=POST_HOUR, minute=POST_MINUTE, second=0, microsecond=0)
     start = end - dt.timedelta(days=1)
     return start, end
 
-
+# Alternate 24-hour test window
 def get_window_last24h(now: dt.datetime):
     end = now
     start = end - dt.timedelta(days=1)
     return start, end
 
-
+# Extract image from embeds
 def get_embed_image(msg: discord.Message) -> str | None:
     for e in msg.embeds:
         if e.image and e.image.url:
@@ -76,7 +75,7 @@ def get_embed_image(msg: discord.Message) -> str | None:
             return e.thumbnail.url
     return None
 
-
+# Download embed images
 async def download_bytes(url: str) -> bytes | None:
     try:
         async with aiohttp.ClientSession() as session:
@@ -88,9 +87,7 @@ async def download_bytes(url: str) -> bytes | None:
         return None
 
 
-# ====================
-# BOT
-# ====================
+# Bot and Intents
 class MotDBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -100,27 +97,28 @@ class MotDBot(commands.Bot):
         intents.message_content = True
         super().__init__(command_prefix="!", intents=intents)
 
+# setup_hook
     async def setup_hook(self):
         announce_winners.start()
 
-
+# Bot Startup
 bot = MotDBot()
 
-
+# on_ready Event
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
 
-
+# Message Listener
 @bot.event
 async def on_message(message: discord.Message):
-    if message.author.bot or message.webhook_id:
+    if message.author.bot or message.webhook_id: # Ignore bots
         return
 
-    # Only react to submissions that have an image attachment or image embed preview
-    if message.channel.id == SUBMISSIONS_CHANNEL_ID:
+    # Only react to images
+    if message.channel.id == SUBMISSIONS_CHANNEL_ID: # Check Submission channel
         has_image = (
-            any(is_image_attachment(att) for att in message.attachments)
+            any(is_image_attachment(att) for att in message.attachments) # Verify image submission
             or any(
                 (e.image and e.image.url) or (e.thumbnail and e.thumbnail.url)
                 for e in message.embeds
@@ -131,14 +129,14 @@ async def on_message(message: discord.Message):
             return  # ignore text-only messages completely
 
         try:
-            if not any(str(r.emoji) == VOTE_EMOJI for r in message.reactions):
+            if not any(str(r.emoji) == VOTE_EMOJI for r in message.reactions): # Auto-add emoji
                 await message.add_reaction(VOTE_EMOJI)
         except Exception:
             pass
 
     await bot.process_commands(message)
 
-
+# Core MOTD logic
 async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False):
     sub_ch = bot_obj.get_channel(SUBMISSIONS_CHANNEL_ID)
     res_ch = bot_obj.get_channel(RESULTS_CHANNEL_ID)
@@ -147,7 +145,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         return
 
     now = dt.datetime.now(TIMEZONE)
-    start, end = (get_window_last24h(now) if use_last24h else get_window_scheduled(now))
+    start, end = (get_window_last24h(now) if use_last24h else get_window_scheduled(now)) # Determine time window
 
     best_by_author: dict[int, discord.Message] = {}
 
@@ -176,7 +174,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         await res_ch.send(text)
         await sub_ch.send(text)
 
-        # Non-pro notice AFTER the images (there are none) – still post after the main announcement
+        # NON-PRO announcement
         if now.weekday() in NON_PRO_WEEKDAYS:
             await sub_ch.send(NON_PRO_MESSAGE)
         return
@@ -196,7 +194,8 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         ranked.append((place, msg))
         last_votes = votes
 
-    # -------- TEXT POST (grouped so ties don't repeat the "In 2nd..." line) --------
+    # TEXT POST
+    # Create announcement message
     lines = ["# Congratulations to our :medal: MODEL OF THE DAY :medal: winners!"]
 
     winners_by_place: dict[int, list[discord.Message]] = {}
@@ -227,7 +226,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
     image_blobs: list[tuple[str, bytes]] = []
 
     for i, (_, msg) in enumerate(ranked):
-        # Prefer first real image attachment only
+        # Prefer the first real image attachment
         att = next((a for a in msg.attachments if is_image_attachment(a)), None)
         if att:
             try:
@@ -255,13 +254,13 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
     if now.weekday() in NON_PRO_WEEKDAYS:
         await sub_ch.send(NON_PRO_MESSAGE)
 
-
+# Daily task
 @tasks.loop(time=dt.time(hour=POST_HOUR, minute=POST_MINUTE, tzinfo=TIMEZONE))
 async def announce_winners():
     await bot.wait_until_ready()
     await run_motd_announcement(bot, use_last24h=False)
 
-
+# DEV commands
 @bot.command(name="motdtest")
 async def motdtest(ctx: commands.Context):
     if ctx.author.id not in DEV_USER_IDS:
@@ -269,8 +268,9 @@ async def motdtest(ctx: commands.Context):
 
     await run_motd_announcement(bot, use_last24h=True)
 
-
+# Token check
 if not TOKEN:
     raise RuntimeError("Set DISCORD_TOKEN environment variable first")
 
+# Start bot
 bot.run(TOKEN)
