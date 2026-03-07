@@ -222,7 +222,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
     await res_ch.send(text)
     await sub_ch.send(text)
 
-    # -------- IMAGE POST --------
+    # IMAGE POST
     image_blobs: list[tuple[str, bytes]] = []
 
     for i, (_, msg) in enumerate(ranked):
@@ -250,7 +250,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         await res_ch.send(files=files_res)
         await sub_ch.send(files=files_sub)
 
-    # -------- NON-PRO DAY NOTICE (AFTER images) --------
+    # NON-PRO DAY NOTICE
     if now.weekday() in NON_PRO_WEEKDAYS:
         await sub_ch.send(NON_PRO_MESSAGE)
 
