@@ -14,7 +14,9 @@ announces model of the day
 
 ## Code
 - Convert to C#
-- Divide files for scalability
+    - Looks like [netcord](https://netcord.dev) is the best, but that's only based off the reviews I skimmed online
+
+- Divide files for scalability (Classes)
 
 ## Misc
 - Name the bot (optional)

@@ -18,6 +18,7 @@ class Program
     const ulong SUBMISSIONS_CHANNEL_ID = 1197939941372608532;
     const ulong RESULTS_CHANNEL_ID = 983134844492079154;
 
+    //UPVOTE ID
     const string VOTE_EMOJI = "<:upvote:962050161771696148>";
 
     static TimeZoneInfo TIMEZONE =
@@ -29,12 +30,14 @@ class Program
     const int TOP_N = 3;
     const bool EXCLUDE_BOT_VOTE = false;
 
+    //DEV USER IDS
     static HashSet<ulong> DEV_USER_IDS = new HashSet<ulong>()
     {
-        1097539138959462471,
-        582786439763329024
+        1097539138959462471,    // Vinpenny
+        582786439763329024      // s3rm0z
     };
 
+    //Non-Pro day handling (Monday, Thursday)
     static HashSet<DayOfWeek> NON_PRO_WEEKDAYS = new HashSet<DayOfWeek>()
     {
         DayOfWeek.Monday,
@@ -74,6 +77,11 @@ class Program
         await Task.Delay(-1);
     }
 
+    /**********
+    FUNCTIONS
+    **********/
+
+    //
     static Task OnReady()
     {
         Console.WriteLine($"Logged in as {client.CurrentUser}");
@@ -133,6 +141,7 @@ class Program
         return (start, end);
     }
 
+    //Event handler for messages being sent
     static async Task OnMessage(SocketMessage message)
     {
         if (message.Author.IsBot)
@@ -158,6 +167,7 @@ class Program
         }
     }
 
+    //Event handler for posting time
     static async Task RunMotdAnnouncement(bool useLast24h)
     {
         var subCh = client.GetChannel(SUBMISSIONS_CHANNEL_ID) as IMessageChannel;
@@ -244,18 +254,26 @@ class Program
             int p = group.Key;
             int votes = ScoreMessage(group.First().msg);
 
-            string emoji = p switch
+            string emoji;
+            switch (p)
             {
-                1 => ":first_place:",
-                2 => ":second_place:",
-                _ => ":third_place:"
+                case (1): emoji = ":first_place:";
+                break;
+                case (2): emoji = ":second_place:";
+                break;
+                case (_): emoji = ":third_place:";
+                break;
             };
-
-            string label = p switch
+            
+            string label;
+            switch (p)
             {
-                1 => "1st",
-                2 => "2nd",
-                _ => "3rd"
+                case (1): label = "1st";
+                break;
+                case (2): label = "2nd";
+                break;
+                case (_): label = "3rd";
+                break;
             };
 
             lines.Add($"In {label} {emoji} place with {votes} upvotes");
@@ -273,6 +291,7 @@ class Program
             await subCh.SendMessageAsync(NON_PRO_MESSAGE);
     }
 
+    //Defines daily loop?
     static async Task DailyLoop()
     {
         while (true)
