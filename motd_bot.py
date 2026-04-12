@@ -3,12 +3,12 @@
 # This bot does the following:
 # 1. Watches a submissions channel for uploaded image posts
 # 2. Automatically adds the vote emoji to valid submissions
-# 3. At a scheduled time, scans the previous MotD time window
-# 4. Picks each user's (single) highest-voted submission only
+# 3. Runs daily, weekly, and monthly winner announcements
+# 4. Picks each user's single highest-voted submission per time window
 # 5. Ranks winners, allowing ties
 # 6. Posts the results in both the results channel and submissions channel
 # 7. Reposts the winning images
-# 8. Posts a Non-Pro notice on Mondays and Thursdays
+# 8. Posts a Non-Pro notice on Mondays and Thursdays after the daily announcement
 #
 # The bot is written in Python using discord.py.
 # Discord itself does NOT care what language is used.
@@ -47,12 +47,23 @@ RESULTS_CHANNEL_ID = 983134844492079154
 # Must match the actual reaction string seen by discord.py
 VOTE_EMOJI = "<:upvote:962050161771696148>"
 
-# Timezone used for the daily reset / announcement
+# Timezone used for resets / announcements
 TIMEZONE = ZoneInfo("Europe/Vienna")
 
 # Daily scheduled posting time
-POST_HOUR = 17
-POST_MINUTE = 0
+# Changed from 17:00 to 16:59 so weekly and monthly can happen right after
+DAILY_POST_HOUR = 16
+DAILY_POST_MINUTE = 59
+
+# Weekly scheduled posting time
+# Weekly runs on Sundays at 17:00
+WEEKLY_POST_HOUR = 17
+WEEKLY_POST_MINUTE = 0
+
+# Monthly scheduled posting time
+# Monthly runs on the 1st at 17:01
+MONTHLY_POST_HOUR = 17
+MONTHLY_POST_MINUTE = 1
 
 # Highest place number to include
 # 3 = 1st, 2nd, 3rd
@@ -130,7 +141,7 @@ def score_message(msg: discord.Message) -> int:
     return 0
 
 
-def get_window_scheduled(now: dt.datetime):
+def get_window_daily(now: dt.datetime):
     """
     Build the normal scheduled MotD time window.
 
@@ -143,23 +154,22 @@ def get_window_scheduled(now: dt.datetime):
             (start, end)
 
     Meaning:
-        This creates the completed MotD day window:
-        yesterday at POST_HOUR:POST_MINUTE -> today at POST_HOUR:POST_MINUTE
-
-    Example:
-        If POST_HOUR = 17 and now is 15-03-2026 17:00,
-        this returns:
-            start = 14-03-2026 17:00
-            end   = 15-03-2026 17:00
+        This creates the completed daily window:
+        yesterday at 16:59 -> today at 16:59
     """
-    end = now.replace(hour=POST_HOUR, minute=POST_MINUTE, second=0, microsecond=0)
+    end = now.replace(
+        hour=DAILY_POST_HOUR,
+        minute=DAILY_POST_MINUTE,
+        second=0,
+        microsecond=0,
+    )
     start = end - dt.timedelta(days=1)
     return start, end
 
 
 def get_window_last24h(now: dt.datetime):
     """
-    Build a rolling 24-hour time window for manual testing.
+    Build a rolling 24-hour time window for manual daily testing.
 
     Receives:
         now (datetime)
@@ -178,6 +188,60 @@ def get_window_last24h(now: dt.datetime):
     """
     end = now
     start = end - dt.timedelta(days=1)
+    return start, end
+
+
+def get_window_weekly(now: dt.datetime):
+    """
+    Build the weekly MotW time window.
+
+    Receives:
+        now (datetime)
+
+    Returns:
+        tuple[datetime, datetime]
+            (start, end)
+
+    Meaning:
+        previous Sunday 17:00 -> current Sunday 17:00
+    """
+    end = now.replace(
+        hour=WEEKLY_POST_HOUR,
+        minute=WEEKLY_POST_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    start = end - dt.timedelta(days=7)
+    return start, end
+
+
+def get_window_monthly(now: dt.datetime):
+    """
+    Build the monthly MotM time window.
+
+    Receives:
+        now (datetime)
+
+    Returns:
+        tuple[datetime, datetime]
+            (start, end)
+
+    Meaning:
+        1st of previous month at 17:00 -> 1st of current month at 17:00
+    """
+    end = now.replace(
+        day=1,
+        hour=WEEKLY_POST_HOUR,
+        minute=WEEKLY_POST_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+
+    if end.month == 1:
+        start = end.replace(year=end.year - 1, month=12)
+    else:
+        start = end.replace(month=end.month - 1)
+
     return start, end
 
 
@@ -226,12 +290,14 @@ class MotDBot(commands.Bot):
             no external arguments
 
         Does:
-            Starts the scheduled daily announcement loop.
+            Starts all scheduled announcement loops.
 
         Returns:
             None
         """
-        announce_winners.start()
+        announce_daily.start()
+        announce_weekly.start()
+        announce_monthly.start()
 
 
 # Create the bot instance
@@ -299,35 +365,45 @@ async def on_message(message: discord.Message):
     await bot.process_commands(message)
 
 
-# CORE MOTD LOGIC
+# SHARED RANKING / POSTING LOGIC
 
-async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False):
+async def run_ranked_announcement(
+    bot_obj: commands.Bot,
+    start: dt.datetime,
+    end: dt.datetime,
+    title_text: str,
+    no_winners_text: str,
+    post_non_pro_notice: bool = False,
+):
     """
-    Main function that performs the full MotD winner calculation and posting.
+    Shared logic for daily, weekly, and monthly announcements.
 
     Receives:
         bot_obj (commands.Bot)
-            The bot instance, used to access channels and send messages.
+            The bot instance.
 
-        use_last24h (bool)
-            If False:
-                use the normal scheduled MotD window
-            If True:
-                use a rolling last-24-hours window for testing
+        start (datetime)
+            Start of the time window.
+
+        end (datetime)
+            End of the time window.
+
+        title_text (str)
+            Announcement title text for this event.
+
+        no_winners_text (str)
+            Message to post if no valid entries were found.
+
+        post_non_pro_notice (bool)
+            If True, the Non-Pro reminder is posted when applicable.
 
     Returns:
         None
 
-    Main steps:
-        1. Get submissions and results channels
-        2. Compute the active time window
-        3. Scan submission history within that window
-        4. Keep only the best-scoring post per author
-        5. Sort all qualifying entries
-        6. Rank 1st/2nd/3rd place, allowing ties
-        7. Post the text announcement
-        8. Repost the winning images
-        9. Post the Non-Pro notice if needed
+    Why this exists:
+        The ranking logic for day / week / month is almost identical.
+        This helper keeps all of that in one place so it does not have
+        to be copied three times.
     """
     sub_ch = bot_obj.get_channel(SUBMISSIONS_CHANNEL_ID)
     res_ch = bot_obj.get_channel(RESULTS_CHANNEL_ID)
@@ -336,7 +412,6 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         return
 
     now = dt.datetime.now(TIMEZONE)
-    start, end = (get_window_last24h(now) if use_last24h else get_window_scheduled(now))
 
     # best_by_author maps:
     #   user_id -> best message for that user in this time window
@@ -370,11 +445,10 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
 
     # No valid entries found
     if not entries:
-        text = "# No winners today"
-        await res_ch.send(text)
-        await sub_ch.send(text)
+        await res_ch.send(no_winners_text)
+        await sub_ch.send(no_winners_text)
 
-        if now.weekday() in NON_PRO_WEEKDAYS:
+        if post_non_pro_notice and now.weekday() in NON_PRO_WEEKDAYS:
             await sub_ch.send(NON_PRO_MESSAGE)
         return
 
@@ -402,8 +476,7 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         last_votes = votes
 
     # TEXT ANNOUNCEMENT
-
-    lines = ["# Congratulations to our :medal: MODEL OF THE DAY :medal: winners!"]
+    lines = [title_text]
 
     # Group tied winners under the same placement line
     winners_by_place: dict[int, list[discord.Message]] = {}
@@ -456,29 +529,119 @@ async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False
         await sub_ch.send(files=files_sub)
 
     # NON-PRO DAY NOTICE
-
-    if now.weekday() in NON_PRO_WEEKDAYS:
+    if post_non_pro_notice and now.weekday() in NON_PRO_WEEKDAYS:
         await sub_ch.send(NON_PRO_MESSAGE)
 
 
-# SCHEDULED TASK
+# CORE DAILY / WEEKLY / MONTHLY LOGIC
 
-@tasks.loop(time=dt.time(hour=POST_HOUR, minute=POST_MINUTE, tzinfo=TIMEZONE))
-async def announce_winners():
+async def run_motd_announcement(bot_obj: commands.Bot, use_last24h: bool = False):
     """
-    Scheduled task that runs once per day at POST_HOUR:POST_MINUTE.
+    Run MODEL OF THE DAY.
 
-    Receives:
-        no explicit external arguments
+    Uses either:
+    - the normal daily window
+    - or the last 24 hours for manual testing
+    """
+    now = dt.datetime.now(TIMEZONE)
+    start, end = (get_window_last24h(now) if use_last24h else get_window_daily(now))
+
+    await run_ranked_announcement(
+        bot_obj=bot_obj,
+        start=start,
+        end=end,
+        title_text="# Congratulations to our :medal: MODEL OF THE DAY :medal: winners!",
+        no_winners_text="# No winners today",
+        post_non_pro_notice=True,
+    )
+
+
+async def run_motw_announcement(bot_obj: commands.Bot):
+    """
+    Run MODEL OF THE WEEK.
+
+    Weekly uses the previous full week:
+    previous Sunday 17:00 -> current Sunday 17:00
+    """
+    now = dt.datetime.now(TIMEZONE)
+    start, end = get_window_weekly(now)
+
+    await run_ranked_announcement(
+        bot_obj=bot_obj,
+        start=start,
+        end=end,
+        title_text="# Congratulations to our :medal: MODEL OF THE WEEK :medal: winners!",
+        no_winners_text="# No weekly winners",
+        post_non_pro_notice=False,
+    )
+
+
+async def run_motm_announcement(bot_obj: commands.Bot):
+    """
+    Run MODEL OF THE MONTH.
+
+    Monthly uses the previous full month:
+    1st of previous month 17:00 -> 1st of current month 17:00
+    """
+    now = dt.datetime.now(TIMEZONE)
+    start, end = get_window_monthly(now)
+
+    await run_ranked_announcement(
+        bot_obj=bot_obj,
+        start=start,
+        end=end,
+        title_text="# Congratulations to our :medal: MODEL OF THE MONTH :medal: winners!",
+        no_winners_text="# No monthly winners",
+        post_non_pro_notice=False,
+    )
+
+
+# SCHEDULED TASKS
+
+@tasks.loop(time=dt.time(hour=DAILY_POST_HOUR, minute=DAILY_POST_MINUTE, tzinfo=TIMEZONE))
+async def announce_daily():
+    """
+    Scheduled task that runs once per day at 16:59.
 
     Does:
-        Waits until the bot is ready, then runs the normal MotD announcement.
-
-    Returns:
-        None
+        Runs the normal daily MotD announcement.
     """
     await bot.wait_until_ready()
     await run_motd_announcement(bot, use_last24h=False)
+
+
+@tasks.loop(time=dt.time(hour=WEEKLY_POST_HOUR, minute=WEEKLY_POST_MINUTE, tzinfo=TIMEZONE))
+async def announce_weekly():
+    """
+    Scheduled task that runs once per day at 17:00.
+
+    Does:
+        Only runs the weekly announcement on Sundays.
+    """
+    await bot.wait_until_ready()
+
+    now = dt.datetime.now(TIMEZONE)
+
+    # Sunday only
+    if now.weekday() == 6:
+        await run_motw_announcement(bot)
+
+
+@tasks.loop(time=dt.time(hour=MONTHLY_POST_HOUR, minute=MONTHLY_POST_MINUTE, tzinfo=TIMEZONE))
+async def announce_monthly():
+    """
+    Scheduled task that runs once per day at 17:01.
+
+    Does:
+        Only runs the monthly announcement on the 1st of the month.
+    """
+    await bot.wait_until_ready()
+
+    now = dt.datetime.now(TIMEZONE)
+
+    # First of the month only
+    if now.day == 1:
+        await run_motm_announcement(bot)
 
 
 # DEV COMMANDS
@@ -486,25 +649,35 @@ async def announce_winners():
 @bot.command(name="motdtest")
 async def motdtest(ctx: commands.Context):
     """
-    Developer-only command to manually run the MotD logic.
-
-    Receives:
-        ctx (commands.Context)
-            Command context containing the author, channel, etc.
-
-    Does:
-        If the author is in DEV_USER_IDS:
-            runs the MotD logic using the last 24 hours
-        Otherwise:
-            silently returns
-
-    Returns:
-        None
+    Developer-only command to manually run MODEL OF THE DAY
+    using the last 24 hours.
     """
     if ctx.author.id not in DEV_USER_IDS:
         return
 
     await run_motd_announcement(bot, use_last24h=True)
+
+
+@bot.command(name="motwtest")
+async def motwtest(ctx: commands.Context):
+    """
+    Developer-only command to manually run MODEL OF THE WEEK.
+    """
+    if ctx.author.id not in DEV_USER_IDS:
+        return
+
+    await run_motw_announcement(bot)
+
+
+@bot.command(name="motmtest")
+async def motmtest(ctx: commands.Context):
+    """
+    Developer-only command to manually run MODEL OF THE MONTH.
+    """
+    if ctx.author.id not in DEV_USER_IDS:
+        return
+
+    await run_motm_announcement(bot)
 
 
 # STARTUP SAFETY CHECK
