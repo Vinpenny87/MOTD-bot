@@ -20,8 +20,14 @@ MODEL_OF_THE_DAY_ROLE_ID = 1393634269544579082
 
 WINNER_OF_THE_DAY_ROLE_ID = 1425135652231577620
 
-
 WINNER_OF_THE_WEEK_ROLE_ID = 1541095899340607548
+
+WINNER_OF_THE_MONTH_ROLE_ID = 1544185477823729684
+
+WINNER_MONTH_STATE_FILE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "winner_of_the_month_state.json",
+)
 
 WINNER_WEEK_STATE_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
