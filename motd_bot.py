@@ -18,18 +18,24 @@ WINNER_OF_THE_DAY_ROLE_ID = 1425135652231577620
 WINNER_OF_THE_WEEK_ROLE_ID = 1541095899340607548
 WINNER_OF_THE_MONTH_ROLE_ID = 1544185477823729684
 
+DATA_DIR = os.getenv(
+    "DATA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data"),
+)
+os.makedirs(DATA_DIR, exist_ok=True)
+
 WINNER_MONTH_STATE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    DATA_DIR,
     "winner_of_the_month_state.json",
 )
 
 WINNER_WEEK_STATE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    DATA_DIR,
     "winner_of_the_week_state.json",
 )
 
 WINNER_STATE_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
+    DATA_DIR,
     "winner_of_the_day_state.json",
 )
 
