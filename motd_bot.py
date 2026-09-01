@@ -468,6 +468,8 @@ async def run_motm_announcement(bot_obj: commands.Bot):
         title_text="# Congratulations to our :medal: MODEL OF THE MONTH :medal: winners!",
         no_winners_text="# No monthly winners",
         post_non_pro_notice=False,
+        winner_role_id=(WINNER_OF_THE_MONTH_ROLE_ID or None),
+        winner_state_file=WINNER_MONTH_STATE_FILE,
     )
 
 
@@ -617,6 +619,79 @@ async def motmtest(ctx: commands.Context):
         return
 
     await run_motm_announcement(bot)
+
+
+@bot.command(name="motmroletest")
+async def motmroletest(ctx: commands.Context):
+    if ctx.author.id not in DEV_USER_IDS:
+        return
+
+    sub_ch = bot.get_channel(SUBMISSIONS_CHANNEL_ID)
+    if not sub_ch:
+        return
+
+    if not WINNER_OF_THE_MONTH_ROLE_ID:
+        await ctx.send("Set WINNER_OF_THE_MONTH_ROLE_ID in motd_bot.py first.")
+        return
+
+    now = dt.datetime.now(TIMEZONE)
+    start, end = get_window_monthly(now)
+
+    best_by_author: dict[int, discord.Message] = {}
+
+    async for msg in sub_ch.history(
+        after=start,
+        before=end,
+        limit=None,
+        oldest_first=True,
+    ):
+        if msg.author.bot or msg.webhook_id:
+            continue
+
+        votes = score_message(msg)
+        if votes <= 0:
+            continue
+
+        author_id = msg.author.id
+        current_best = best_by_author.get(author_id)
+
+        if (
+            current_best is None
+            or votes > score_message(current_best)
+            or (
+                votes == score_message(current_best)
+                and msg.created_at < current_best.created_at
+            )
+        ):
+            best_by_author[author_id] = msg
+
+    entries = list(best_by_author.values())
+    entries.sort(key=lambda m: (-score_message(m), m.created_at))
+
+    ranked: list[tuple[int, discord.Message]] = []
+    place = 0
+    last_votes = None
+
+    for msg in entries:
+        votes = score_message(msg)
+
+        if last_votes is None or votes < last_votes:
+            place += 1
+
+        if place > TOP_N:
+            break
+
+        ranked.append((place, msg))
+        last_votes = votes
+
+    winner_ids = {msg.author.id for _, msg in ranked}
+
+    await update_winner_roles(
+        guild=sub_ch.guild,
+        role_id=WINNER_OF_THE_MONTH_ROLE_ID,
+        current_winner_ids=winner_ids,
+        state_file=WINNER_MONTH_STATE_FILE,
+    )
 
 
 if not TOKEN:
